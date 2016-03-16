@@ -232,10 +232,12 @@ class mpReviewWidget(ScriptedLoadableModuleWidget, ModuleWidgetMixin):
     self.seriesView.setSelectionMode(qt.QAbstractItemView.ExtendedSelection)
     self.selectAllSeriesButton = self.createButton('Select All')
     self.deselectAllSeriesButton = self.createButton('Deselect All')
+    self.saveSeriesAsDefaultButton = self.createButton('Save as Default')
     self.selectAllSeriesButton.setEnabled(False)
     self.deselectAllSeriesButton.setEnabled(False)
+    self.saveSeriesAsDefaultButton.setEnabled(False)
     seriesGroupBoxLayout.addWidget(self.seriesView, 0, 0, 1, 2)
-    seriesGroupBoxLayout.addWidget(self.createHLayout([self.selectAllSeriesButton,  self.deselectAllSeriesButton]),
+    seriesGroupBoxLayout.addWidget(self.createHLayout([self.selectAllSeriesButton,  self.deselectAllSeriesButton, self.saveSeriesAsDefaultButton]),
                                    1, 0, 1, 2)
     self.studyAndSeriesSelectionWidgetLayout.addWidget(self.seriesGroupBox, 3, 0, 1, 3)
 
@@ -426,6 +428,7 @@ class mpReviewWidget(ScriptedLoadableModuleWidget, ModuleWidgetMixin):
       self.dataDirButton.directorySelected.connect(lambda: setattr(self, "inputDataDir", self.dataDirButton.directory))
       self.selectAllSeriesButton.connect('clicked()', lambda: self.selectAllSeries(True))
       self.deselectAllSeriesButton.connect('clicked()', lambda: self.selectAllSeries(False))
+      self.saveSeriesAsDefaultButton.connect('clicked()', self.saveSelectedSeriesAsDefault)
       self.deleteStructureButton.connect('clicked()', self.onDeleteStructure)
       self.propagateButton.connect('clicked()', self.onPropagateROI)
       self.createFiducialsButton.connect('clicked()', self.onCreateFiducialsButtonClicked)
@@ -1205,11 +1208,12 @@ class mpReviewWidget(ScriptedLoadableModuleWidget, ModuleWidgetMixin):
       self.seriesItems.append(sItem)
       self.seriesModel.appendRow(sItem)
       sItem.setCheckable(1)
-      if self.logic.isSeriesOfInterest(seriesText):
+      if self.logic.isSeriesOfInterest(seriesText) and self.logic.isSeriesCheckedByDefault(self.inputDataDir, seriesText):
         sItem.setCheckState(2)
 
     self.selectAllSeriesButton.setEnabled(True)
     self.deselectAllSeriesButton.setEnabled(True)
+    self.saveSeriesAsDefaultButton.setEnabled(True)
     
     progress.delete()
     self.setTabsEnabled([1], True)
@@ -1838,6 +1842,17 @@ class mpReviewWidget(ScriptedLoadableModuleWidget, ModuleWidgetMixin):
       item.setCheckState(2 if selected else 0)
     self.setTabsEnabled([1], selected)
 
+  def saveSelectedSeriesAsDefault(self):
+    checkedItemDescriptions = [str(item.text().split(':')[1]) for item in self.seriesItems if item.checkState()]
+    defaultSeriesFilename = self.logic.getDefaultSeriesFilename(self.inputDataDir)
+    if os.path.isfile(defaultSeriesFilename):
+      # TODO: in the dialog show a diff between currently checked items and the file contents
+      if not self.confirmDialog("File "+defaultSeriesFilename+" already exists. Overwrite?"):
+          return
+    with open(defaultSeriesFilename, 'w') as f:
+      for seriesDescription in checkedItemDescriptions:
+        f.write(seriesDescription+'\n')
+    
   def onTranslate(self):
     if self.ignoreTranslate:
       return
@@ -2098,6 +2113,24 @@ class mpReviewLogic(ScriptedLoadableModuleLogic):
       if string.find(desc,d)>=0:
         return False
     return True
+
+  @staticmethod
+  def getDefaultSeriesFilename(inputDataDir):
+    return os.path.join(inputDataDir, 'SETTINGS', inputDataDir.split(os.sep)[-1] + '-default-series')
+
+  @staticmethod
+  def isSeriesCheckedByDefault(inputDataDir, desc):
+    defaultSeriesFilename = mpReviewLogic.getDefaultSeriesFilename(inputDataDir)
+    if os.path.isfile(defaultSeriesFilename):
+      with open(defaultSeriesFilename) as f:
+        defaultSeries = f.read().splitlines()
+      # TODO: this isn't very flexible/robust. maybe need to use abbreviateName?
+      for d in defaultSeries:
+        if string.find(desc, d) >= 0:
+          return True
+      return False
+    else:
+      return True
 
   @staticmethod
   def abbreviateName(meta):
